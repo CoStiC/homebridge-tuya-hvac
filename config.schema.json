@@ -1,0 +1,40 @@
+{
+  "pluginAlias": "TuyaHvac",
+  "pluginType": "platform",
+  "singular": true,
+  "strictValidation": true,
+  "schema": {
+    "type": "object",
+    "required": ["name", "deviceId", "ip", "localKey", "protocolVersion"],
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "title": "Nom de l’accessoire",
+        "type": "string",
+        "default": "Piscine",
+        "minLength": 1
+      },
+      "deviceId": {
+        "title": "Device ID Tuya",
+        "type": "string",
+        "minLength": 1
+      },
+      "ip": {
+        "title": "Adresse IP",
+        "type": "string",
+        "minLength": 1
+      },
+      "localKey": {
+        "title": "Local Key",
+        "type": "string",
+        "minLength": 1
+      },
+      "protocolVersion": {
+        "title": "Version du protocole Tuya",
+        "type": "string",
+        "default": "3.5",
+        "enum": ["3.5"]
+      }
+    }
+  }
+}
