@@ -8,10 +8,13 @@ import type {
   Service,
 } from 'homebridge';
 
+import { HvacController } from './application/hvac-controller.js';
 import { validateConfig } from './config.js';
 import type { TuyaHvacPlatformConfig } from './config.js';
 import { HeaterCoolerAccessory } from './homekit/heater-cooler-accessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
+import { TuyaClient } from './tuya/tuya-client.js';
+import { TuyaHvacGateway } from './tuya/tuya-hvac-gateway.js';
 
 export class TuyaHvacPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service;
@@ -43,11 +46,12 @@ export class TuyaHvacPlatform implements DynamicPlatformPlugin {
   private registerAccessory(): void {
     const uuid = this.api.hap.uuid.generate(this.config.deviceId);
     const existingAccessory = this.accessories.get(uuid);
+    const controller = this.createController();
 
     if (existingAccessory) {
       this.log.info('Réutilisation de l’accessoire existant : %s', existingAccessory.displayName);
 
-      new HeaterCoolerAccessory(this, existingAccessory);
+      new HeaterCoolerAccessory(this, existingAccessory, controller);
       return;
     }
 
@@ -55,10 +59,23 @@ export class TuyaHvacPlatform implements DynamicPlatformPlugin {
 
     accessory.context.deviceId = this.config.deviceId;
 
-    new HeaterCoolerAccessory(this, accessory);
+    new HeaterCoolerAccessory(this, accessory, controller);
 
     this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
 
     this.log.info('Nouvel accessoire enregistré : %s', accessory.displayName);
+  }
+
+  private createController(): HvacController {
+    const client = new TuyaClient({
+      deviceId: this.config.deviceId,
+      localKey: this.config.localKey,
+      ip: this.config.ip,
+      protocolVersion: this.config.protocolVersion,
+    });
+
+    const gateway = new TuyaHvacGateway(client);
+
+    return new HvacController(gateway);
   }
 }

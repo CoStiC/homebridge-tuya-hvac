@@ -6,14 +6,10 @@ import { TuyaHvacGateway } from '../dist/tuya/tuya-hvac-gateway.js';
 const configFile = new URL('../homebridge-dev/config.json', import.meta.url);
 const config = JSON.parse(await readFile(configFile, 'utf8'));
 
-const platformConfig = config.platforms?.find(
-  (platform) => platform.platform === 'TuyaHvac',
-);
+const platformConfig = config.platforms?.find((platform) => platform.platform === 'TuyaHvac');
 
 if (!platformConfig) {
-  throw new Error(
-    'Configuration TuyaHvac absente de homebridge-dev/config.json.',
-  );
+  throw new Error('Configuration TuyaHvac absente de homebridge-dev/config.json.');
 }
 
 const client = new TuyaClient({
