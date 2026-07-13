@@ -1,6 +1,6 @@
 # Release process
 
-The project is not yet published to npm. Until a public licence and publication policy are selected, releases are validated as local npm tarballs only.
+The project is not yet published to npm. Until the publication policy is approved, releases are validated as local npm tarballs only.
 
 ## Prerequisites
 
@@ -32,6 +32,7 @@ The `prepack` script rebuilds `dist/`. Inspect the npm file listing and verify t
 
 - `dist/`;
 - `config.schema.json`;
+- `LICENSE`;
 - `package.json`;
 - the root `README.md`.
 
@@ -56,7 +57,6 @@ Delete the generated tarball after validation. Do not commit it.
 
 Public npm publication remains blocked until all of the following are explicitly decided and completed:
 
-- choose and add a licence;
 - remove `private: true` intentionally;
 - verify the final package name, repository URL and support metadata;
 - verify that the Node.js 22 and 24 GitHub Actions jobs pass on the release commit;

@@ -26,8 +26,16 @@
     "heat-pump",
     "homekit"
   ],
-  "author": "Pierre MARS",
-  "license": "UNLICENSED",
+  "author": "CoStiC",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CoStiC/homebridge-tuya-hvac.git"
+  },
+  "homepage": "https://github.com/CoStiC/homebridge-tuya-hvac#readme",
+  "bugs": {
+    "url": "https://github.com/CoStiC/homebridge-tuya-hvac/issues"
+  },
   "type": "module",
   "private": true,
   "engines": {

@@ -6,6 +6,7 @@
 
 - Minimal local npm package with a root user guide and documented installation procedure.
 - Read-only GitHub Actions validation on Node.js 22 and 24.
+- MIT licensing and public repository, homepage and issue-tracker metadata.
 - Confirmed independent ON/OFF control through HomeKit `HeaterCooler.Active`.
 - Background HomeKit commands with latest-intention coalescing.
 - Confirmed DP4 mode pipeline for HomeKit AUTO, HEAT and COOL, validated end to end with the real device.

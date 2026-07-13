@@ -80,4 +80,8 @@ Real-device validation is required for protocol-facing changes. Unit tests alone
 
 ## Project status
 
-This project is under active development and is not yet ready for public npm publication. Licensing terms have not yet been selected.
+This project is under active development and is not yet ready for public npm publication.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
