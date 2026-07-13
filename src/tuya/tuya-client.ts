@@ -53,11 +53,13 @@ export class TuyaClient {
     await this.withTimeout(
       this.device.find(),
       'Délai dépassé pendant la détection du périphérique Tuya.',
+      'Échec pendant la détection du périphérique Tuya.',
     );
 
     await this.withTimeout(
       this.device.connect(),
       'Délai dépassé pendant la connexion au périphérique Tuya.',
+      'Échec pendant la connexion au périphérique Tuya.',
     );
 
     this.connected = true;
@@ -80,6 +82,7 @@ export class TuyaClient {
         schema: true,
       }),
       'Délai dépassé pendant la lecture de l’état Tuya.',
+      'Échec pendant la lecture de l’état Tuya.',
     )) as TuyaStatusResponse;
 
     if (response.dps === null || typeof response.dps !== 'object' || Array.isArray(response.dps)) {
@@ -106,6 +109,7 @@ export class TuyaClient {
         set: value,
       }),
       'Délai dépassé pendant l’écriture Tuya.',
+      'Échec pendant l’écriture Tuya.',
     );
   }
 
@@ -115,17 +119,25 @@ export class TuyaClient {
     }
   }
 
-  private async withTimeout<T>(operation: Promise<T>, errorMessage: string): Promise<T> {
+  private async withTimeout<T>(
+    operation: Promise<T>,
+    timeoutMessage: string,
+    failureMessage: string,
+  ): Promise<T> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const safeOperation = operation.catch((error: unknown) => {
+      throw new Error(failureMessage, { cause: error });
+    });
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeout = setTimeout(() => {
-        reject(new Error(errorMessage));
+        reject(new Error(timeoutMessage));
       }, TUYA_OPERATION_TIMEOUT_MS);
     });
 
     try {
-      return await Promise.race([operation, timeoutPromise]);
+      return await Promise.race([safeOperation, timeoutPromise]);
     } finally {
       if (timeout !== undefined) {
         clearTimeout(timeout);

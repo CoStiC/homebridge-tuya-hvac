@@ -10,5 +10,6 @@ The Tuya Cloud is not a runtime dependency. It may be used during setup or inves
 - Device state must be confirmed by an explicit read after every write.
 - Some responses observed around writes are partial; they cannot produce `HvacState`.
 - Disconnecting immediately from an unawaited fire-and-forget write can interrupt the actual send. Writes therefore retain TuyAPI's awaited response behavior and are followed by independent confirmation reads.
+- Native TuyAPI failures are normalized at the `TuyaClient` boundary before they reach Homebridge. Public error messages identify the failed operation without including raw protocol details, device identifiers or Local Keys; the original error is retained only as an internal cause.
 
 See [confirmed transactions](../architecture/transactions.md) for the gateway algorithm.
