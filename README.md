@@ -43,7 +43,12 @@ Keep local tarballs private because they represent development builds.
 
 ## Configuration
 
-Configure the plugin through the Homebridge UI when available, or add the platform configuration without committing it to source control:
+The normal installation and configuration flow uses the Homebridge UI and does
+not require a manual npm command. See the complete
+[installation guide](docs/installation.md), including the validated TinyTuya
+procedure for retrieving the Device ID and Local Key.
+
+The resulting platform configuration has this shape; never commit a real copy:
 
 ```json
 {
@@ -74,7 +79,8 @@ Boost and Silent/Eco Tuya modes are recognized when reading device state but are
 
 ## Documentation
 
-Technical architecture, protocol notes, testing guidance and the changelog are available in [`docs/`](docs/README.md).
+The [installation guide](docs/installation.md), technical architecture, protocol
+notes, testing guidance and changelog are available in [`docs/`](docs/README.md).
 
 ## Development
 

@@ -16,16 +16,19 @@
       },
       "deviceId": {
         "title": "Device ID Tuya",
+        "description": "Identifiant de l’appareil obtenu avec le wizard TinyTuya. Ne pas le confondre avec le Product ID ou le Client ID du projet Cloud.",
         "type": "string",
         "minLength": 1
       },
       "ip": {
         "title": "Adresse IP",
+        "description": "Adresse IPv4 réservée à la PAC dans le routeur.",
         "type": "string",
         "minLength": 1
       },
       "localKey": {
         "title": "Local Key",
+        "description": "Clé locale secrète obtenue avec le wizard TinyTuya. Elle peut changer si l’appareil est supprimé puis réassocié dans Smart Life.",
         "type": "string",
         "minLength": 1
       },

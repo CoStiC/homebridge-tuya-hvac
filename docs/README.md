@@ -2,6 +2,10 @@
 
 This directory is the technical and operational Knowledge Base distributed with the project.
 
+## User guide
+
+- [Installation and Tuya credential retrieval](installation.md)
+
 ## Architecture
 
 - [Reference architecture](architecture/architecture.md)
