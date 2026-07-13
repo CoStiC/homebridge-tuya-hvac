@@ -59,6 +59,6 @@ Public npm publication remains blocked until all of the following are explicitly
 - choose and add a licence;
 - remove `private: true` intentionally;
 - verify the final package name, repository URL and support metadata;
-- add and validate the minimal GitHub CI workflow;
+- verify that the Node.js 22 and 24 GitHub Actions jobs pass on the release commit;
 - approve the changelog and public version;
 - complete the beta publication checklist in Notion.

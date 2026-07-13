@@ -13,3 +13,5 @@ npm run build
 Unit tests cover configuration defaults and bounds, domain mapping, complete reads, confirmed and rejected writes, transaction serialization, HomeKit translation, target-temperature capability validation, request coalescing, polling lifecycle, availability transitions and normalization of native TuyAPI errors before logging.
 
 Protocol-facing increments also require isolated real-device validation using `homebridge-dev/`. Automated tests do not prove LAN timing or physical device behavior. Never inspect or publish the sensitive development configuration or raw logs containing credentials and identifiers.
+
+GitHub Actions runs the same non-hardware checks on every push and pull request with Node.js 22 and 24. The CI environment never receives Tuya credentials or Homebridge development storage and does not replace real-device validation.
