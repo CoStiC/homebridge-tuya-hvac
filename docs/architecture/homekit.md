@@ -242,6 +242,12 @@ Periodic reads use the same serialized gateway as commands. The polling timer is
 
 Real-device validation confirmed that external ON and OFF changes are reflected in the Home application by subsequent polling cycles. An isolated read timeout is logged and does not stop later synchronization attempts.
 
+To avoid availability flicker, one or two consecutive refresh failures remain diagnostic-only. On the third consecutive failure, every state characteristic is placed in the HomeKit service-communication error state and the transition is logged once. Further failures remain at debug level while polling continues.
+
+Any subsequently confirmed `HvacState`, whether obtained by polling or by a command, clears the failure count, restores all characteristic values and logs recovery once.
+
+Real-device validation confirmed the complete transition: after three consecutive failed reads the Home application displayed “No Response”; polling continued while the PAC was blocked from the network; after network access was restored, the first complete read cleared the error and restored the confirmed OFF state in Home.
+
 ---
 
 # Error Handling

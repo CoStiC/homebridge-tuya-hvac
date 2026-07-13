@@ -5,12 +5,16 @@ import { HvacMode } from '../domain/hvac-mode.js';
 import type { HvacState } from '../domain/hvac-state.js';
 import type { TuyaHvacPlatform } from '../platform.js';
 
+const UNAVAILABLE_AFTER_FAILURES = 3;
+
 export class HeaterCoolerAccessory {
   private readonly service: Service;
   private readonly refreshTimer: ReturnType<typeof setInterval>;
   private refreshInProgress = false;
   private shutdownRequested = false;
   private initialStateSynchronized = false;
+  private consecutiveRefreshFailures = 0;
+  private deviceUnavailable = false;
   private activeRequestId = 0;
   private activeWorkerRunning = false;
   private pendingActiveRequest:
@@ -158,16 +162,50 @@ export class HeaterCoolerAccessory {
           state.mode,
         );
       }
-    } catch (error) {
-      this.platform.log.error(
-        this.initialStateSynchronized
-          ? 'Impossible de rafraîchir l’état de la PAC : %s'
-          : 'Impossible de lire l’état initial de la PAC : %s',
-        error instanceof Error ? error.message : String(error),
-      );
+    } catch {
+      if (!this.shutdownRequested) {
+        this.recordRefreshFailure();
+      }
     } finally {
       this.refreshInProgress = false;
     }
+  }
+
+  private recordRefreshFailure(): void {
+    this.consecutiveRefreshFailures += 1;
+
+    if (this.deviceUnavailable) {
+      this.platform.log.debug('PAC toujours indisponible ; nouvelle tentative au prochain cycle.');
+      return;
+    }
+
+    if (this.consecutiveRefreshFailures >= UNAVAILABLE_AFTER_FAILURES) {
+      this.deviceUnavailable = true;
+      this.markStateUnavailable();
+      this.platform.log.error(
+        'PAC indisponible après %d échecs de rafraîchissement consécutifs.',
+        this.consecutiveRefreshFailures,
+      );
+      return;
+    }
+
+    this.platform.log.debug(
+      'Échec de rafraîchissement de la PAC (%d/%d).',
+      this.consecutiveRefreshFailures,
+      UNAVAILABLE_AFTER_FAILURES,
+    );
+  }
+
+  private markStateUnavailable(): void {
+    const error = new Error('Communication avec la PAC indisponible.');
+
+    this.service
+      .updateCharacteristic(this.platform.Characteristic.Active, error)
+      .updateCharacteristic(this.platform.Characteristic.CurrentTemperature, error)
+      .updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, error)
+      .updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, error)
+      .updateCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, error)
+      .updateCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState, error);
   }
 
   private async setActiveInBackground(active: boolean, requestId: number): Promise<void> {
@@ -423,6 +461,11 @@ export class HeaterCoolerAccessory {
   }
 
   private applyState(state: HvacState): void {
+    const wasUnavailable = this.deviceUnavailable;
+
+    this.consecutiveRefreshFailures = 0;
+    this.deviceUnavailable = false;
+
     this.service
       .updateCharacteristic(
         this.platform.Characteristic.Active,
@@ -452,6 +495,10 @@ export class HeaterCoolerAccessory {
           ? this.platform.Characteristic.CurrentHeaterCoolerState.IDLE
           : this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE,
       );
+
+    if (wasUnavailable) {
+      this.platform.log.info('Communication avec la PAC rétablie.');
+    }
   }
 
   private toTargetHeaterCoolerState(mode: HvacMode): number {

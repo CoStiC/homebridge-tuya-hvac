@@ -15,3 +15,4 @@
 - Per-device transactions are serialized.
 - Ambiguous writes use bounded explicit confirmation reads and one idempotent write retry.
 - Configurable periodic state synchronization, with a 30-second default, overlap protection, timeout recovery and clean shutdown, validated with external ON/OFF changes.
+- HomeKit communication-error state after three consecutive refresh failures, with deduplicated transition logs and automatic recovery from confirmed state, validated through a real network interruption.

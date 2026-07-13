@@ -47,7 +47,9 @@ function createAccessoryHarness(): {
   readonly shutdown: () => void;
   readonly scheduleInterval: ReturnType<typeof vi.fn>;
   readonly cancelInterval: ReturnType<typeof vi.fn>;
+  readonly logDebug: ReturnType<typeof vi.fn>;
   readonly logError: ReturnType<typeof vi.fn>;
+  readonly logInfo: ReturnType<typeof vi.fn>;
   readonly updateCharacteristic: ReturnType<typeof vi.fn>;
   readonly activeCharacteristic: { readonly ACTIVE: number; readonly INACTIVE: number };
   readonly targetCharacteristic: {
@@ -218,7 +220,9 @@ function createAccessoryHarness(): {
     shutdown: () => heaterCoolerAccessory.shutdown(),
     scheduleInterval,
     cancelInterval,
+    logDebug: platform.log.debug as ReturnType<typeof vi.fn>,
     logError: platform.log.error as ReturnType<typeof vi.fn>,
+    logInfo: platform.log.info as ReturnType<typeof vi.fn>,
     updateCharacteristic: service.updateCharacteristic,
     activeCharacteristic,
     targetCharacteristic: characteristics.TargetHeaterCoolerState,
@@ -266,18 +270,67 @@ describe('HeaterCoolerAccessory', () => {
     expect(harness.controller.getState).not.toHaveBeenCalled();
   });
 
-  it('distingue une erreur de rafraîchissement d’une erreur de lecture initiale', async () => {
+  it('signale l’indisponibilité au troisième échec sans répéter le log', async () => {
     const harness = createAccessoryHarness();
 
     await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+    harness.controller.getState.mockReset();
+    harness.updateCharacteristic.mockClear();
+    harness.logDebug.mockClear();
+    harness.logError.mockClear();
     harness.controller.getState.mockRejectedValue(new Error('Lecture impossible'));
-    harness.triggerRefresh();
 
+    harness.triggerRefresh();
+    await vi.waitFor(() => expect(harness.logDebug).toHaveBeenCalledTimes(1));
+
+    harness.triggerRefresh();
+    await vi.waitFor(() => expect(harness.logDebug).toHaveBeenCalledTimes(2));
+
+    expect(
+      harness.updateCharacteristic.mock.calls.some(([, value]) => value instanceof Error),
+    ).toBe(false);
+
+    harness.triggerRefresh();
     await vi.waitFor(() =>
       expect(harness.logError).toHaveBeenCalledWith(
-        'Impossible de rafraîchir l’état de la PAC : %s',
-        'Lecture impossible',
+        'PAC indisponible après %d échecs de rafraîchissement consécutifs.',
+        3,
       ),
+    );
+
+    expect(
+      harness.updateCharacteristic.mock.calls.filter(([, value]) => value instanceof Error),
+    ).toHaveLength(6);
+
+    harness.triggerRefresh();
+    await vi.waitFor(() =>
+      expect(harness.logDebug).toHaveBeenCalledWith(
+        'PAC toujours indisponible ; nouvelle tentative au prochain cycle.',
+      ),
+    );
+
+    expect(harness.logError).toHaveBeenCalledOnce();
+  });
+
+  it('rétablit la disponibilité depuis un état confirmé par une commande', async () => {
+    const harness = createAccessoryHarness();
+
+    await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+    harness.controller.getState.mockReset().mockRejectedValue(new Error('Lecture impossible'));
+
+    harness.triggerRefresh();
+    await vi.waitFor(() => expect(harness.logDebug).toHaveBeenCalledTimes(1));
+    harness.triggerRefresh();
+    await vi.waitFor(() => expect(harness.logDebug).toHaveBeenCalledTimes(2));
+    harness.triggerRefresh();
+    await vi.waitFor(() => expect(harness.logError).toHaveBeenCalledOnce());
+
+    harness.logInfo.mockClear();
+    harness.controller.setActive.mockResolvedValue(state(true));
+    harness.triggerActive(harness.activeCharacteristic.ACTIVE);
+
+    await vi.waitFor(() =>
+      expect(harness.logInfo).toHaveBeenCalledWith('Communication avec la PAC rétablie.'),
     );
   });
 

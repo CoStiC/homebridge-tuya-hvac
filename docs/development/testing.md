@@ -10,6 +10,6 @@ npm test
 npm run build
 ```
 
-Unit tests cover configuration defaults and bounds, domain mapping, complete reads, confirmed and rejected writes, transaction serialization, HomeKit translation, target-temperature capability validation, request coalescing and polling lifecycle.
+Unit tests cover configuration defaults and bounds, domain mapping, complete reads, confirmed and rejected writes, transaction serialization, HomeKit translation, target-temperature capability validation, request coalescing, polling lifecycle and availability transitions.
 
 Protocol-facing increments also require isolated real-device validation using `homebridge-dev/`. Automated tests do not prove LAN timing or physical device behavior. Never inspect or publish the sensitive development configuration or raw logs containing credentials and identifiers.
