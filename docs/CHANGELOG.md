@@ -14,3 +14,4 @@
 - Complete-state validation rejects partial Tuya responses.
 - Per-device transactions are serialized.
 - Ambiguous writes use bounded explicit confirmation reads and one idempotent write retry.
+- Configurable periodic state synchronization, with a 30-second default, overlap protection, timeout recovery and clean shutdown, validated with external ON/OFF changes.

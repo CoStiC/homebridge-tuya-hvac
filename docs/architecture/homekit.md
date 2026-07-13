@@ -236,6 +236,12 @@ The controller is responsible for:
 - propagating changes to HomeKit;
 - maintaining consistency.
 
+The adapter performs an initial read and then refreshes the complete device state periodically. The interval is configured with `refreshIntervalSeconds`, defaults to 30 seconds and accepts integer values from 5 to 3600 seconds. A new periodic read is skipped while the previous refresh is still running.
+
+Periodic reads use the same serialized gateway as commands. The polling timer is cancelled during Homebridge shutdown, and a read finishing after shutdown does not update HomeKit.
+
+Real-device validation confirmed that external ON and OFF changes are reflected in the Home application by subsequent polling cycles. An isolated read timeout is logged and does not stop later synchronization attempts.
+
 ---
 
 # Error Handling

@@ -34,6 +34,14 @@
         "type": "string",
         "default": "3.5",
         "enum": ["3.5"]
+      },
+      "refreshIntervalSeconds": {
+        "title": "Intervalle de rafraîchissement (secondes)",
+        "description": "Fréquence de synchronisation de l’état réel de la PAC.",
+        "type": "integer",
+        "default": 30,
+        "minimum": 5,
+        "maximum": 3600
       }
     }
   }

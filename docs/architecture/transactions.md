@@ -24,4 +24,4 @@ The current strategy uses at most two idempotent writes and five reads per write
 
 ## Serialization
 
-Transactions for one device are serialized by `TuyaHvacGateway`; reads and writes do not overlap. HomeKit background workers may accept newer intentions while a transaction is running, but only the latest pending intention for power, mode or the shared target temperature is retained.
+Transactions for one device are serialized by `TuyaHvacGateway`; periodic reads and command transactions do not overlap. HomeKit background workers may accept newer intentions while a transaction is running, but only the latest pending intention for power, mode or the shared target temperature is retained.

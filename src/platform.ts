@@ -22,6 +22,7 @@ export class TuyaHvacPlatform implements DynamicPlatformPlugin {
   public readonly config: TuyaHvacPlatformConfig;
 
   private readonly accessories = new Map<string, PlatformAccessory>();
+  private readonly accessoryHandlers = new Set<HeaterCoolerAccessory>();
 
   public constructor(
     public readonly log: Logging,
@@ -34,6 +35,10 @@ export class TuyaHvacPlatform implements DynamicPlatformPlugin {
 
     this.api.on('didFinishLaunching', () => {
       this.registerAccessory();
+    });
+
+    this.api.on('shutdown', () => {
+      this.shutdown();
     });
   }
 
@@ -51,7 +56,7 @@ export class TuyaHvacPlatform implements DynamicPlatformPlugin {
     if (existingAccessory) {
       this.log.info('Réutilisation de l’accessoire existant : %s', existingAccessory.displayName);
 
-      new HeaterCoolerAccessory(this, existingAccessory, controller);
+      this.accessoryHandlers.add(new HeaterCoolerAccessory(this, existingAccessory, controller));
       return;
     }
 
@@ -59,11 +64,19 @@ export class TuyaHvacPlatform implements DynamicPlatformPlugin {
 
     accessory.context.deviceId = this.config.deviceId;
 
-    new HeaterCoolerAccessory(this, accessory, controller);
+    this.accessoryHandlers.add(new HeaterCoolerAccessory(this, accessory, controller));
 
     this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
 
     this.log.info('Nouvel accessoire enregistré : %s', accessory.displayName);
+  }
+
+  private shutdown(): void {
+    for (const handler of this.accessoryHandlers) {
+      handler.shutdown();
+    }
+
+    this.accessoryHandlers.clear();
   }
 
   private createController(): HvacController {

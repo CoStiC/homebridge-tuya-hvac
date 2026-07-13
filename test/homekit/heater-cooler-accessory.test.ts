@@ -43,6 +43,11 @@ function createAccessoryHarness(): {
   readonly triggerMode: (value: number) => void;
   readonly triggerHeatingThreshold: (value: number) => void;
   readonly triggerCoolingThreshold: (value: number) => void;
+  readonly triggerRefresh: () => void;
+  readonly shutdown: () => void;
+  readonly scheduleInterval: ReturnType<typeof vi.fn>;
+  readonly cancelInterval: ReturnType<typeof vi.fn>;
+  readonly logError: ReturnType<typeof vi.fn>;
   readonly updateCharacteristic: ReturnType<typeof vi.fn>;
   readonly activeCharacteristic: { readonly ACTIVE: number; readonly INACTIVE: number };
   readonly targetCharacteristic: {
@@ -72,6 +77,7 @@ function createAccessoryHarness(): {
   let modeHandler: ((value: number) => void) | undefined;
   let heatingThresholdHandler: ((value: number) => void) | undefined;
   let coolingThresholdHandler: ((value: number) => void) | undefined;
+  let refreshHandler: (() => void) | undefined;
   const activeHandlerCharacteristic = {
     onSet: vi.fn((handler: (value: number) => void) => {
       activeHandler = handler;
@@ -149,7 +155,7 @@ function createAccessoryHarness(): {
   const platform = {
     api: { hap: { Characteristic: characteristics } },
     Characteristic: characteristics,
-    config: { deviceId: 'test-device' },
+    config: { deviceId: 'test-device', refreshIntervalSeconds: 30 },
     log: {
       debug: vi.fn(),
       error: vi.fn(),
@@ -158,7 +164,19 @@ function createAccessoryHarness(): {
     Service: services,
   } as unknown as TuyaHvacPlatform;
 
-  new HeaterCoolerAccessory(platform, accessory, controller as unknown as HvacController);
+  const refreshTimer = {} as ReturnType<typeof setInterval>;
+  const scheduleInterval = vi.fn((handler: () => void) => {
+    refreshHandler = handler;
+    return refreshTimer;
+  });
+  const cancelInterval = vi.fn();
+  const heaterCoolerAccessory = new HeaterCoolerAccessory(
+    platform,
+    accessory,
+    controller as unknown as HvacController,
+    scheduleInterval as unknown as typeof setInterval,
+    cancelInterval as unknown as typeof clearInterval,
+  );
 
   return {
     controller,
@@ -190,6 +208,17 @@ function createAccessoryHarness(): {
 
       coolingThresholdHandler(value);
     },
+    triggerRefresh: () => {
+      if (refreshHandler === undefined) {
+        throw new Error('Rafraîchissement périodique non enregistré.');
+      }
+
+      refreshHandler();
+    },
+    shutdown: () => heaterCoolerAccessory.shutdown(),
+    scheduleInterval,
+    cancelInterval,
+    logError: platform.log.error as ReturnType<typeof vi.fn>,
     updateCharacteristic: service.updateCharacteristic,
     activeCharacteristic,
     targetCharacteristic: characteristics.TargetHeaterCoolerState,
@@ -197,6 +226,61 @@ function createAccessoryHarness(): {
 }
 
 describe('HeaterCoolerAccessory', () => {
+  it('programme le rafraîchissement avec l’intervalle configuré', () => {
+    const harness = createAccessoryHarness();
+
+    expect(harness.scheduleInterval).toHaveBeenCalledOnce();
+    expect(harness.scheduleInterval).toHaveBeenCalledWith(expect.any(Function), 30_000);
+  });
+
+  it('ne chevauche pas deux rafraîchissements', async () => {
+    const harness = createAccessoryHarness();
+    const periodicRead = deferred<HvacState>();
+
+    await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+    harness.controller.getState.mockReset().mockReturnValue(periodicRead.promise);
+    harness.triggerRefresh();
+    harness.triggerRefresh();
+
+    expect(harness.controller.getState).toHaveBeenCalledOnce();
+
+    periodicRead.resolve(state(false));
+    await periodicRead.promise;
+    await Promise.resolve();
+
+    harness.controller.getState.mockResolvedValue(state(true));
+    harness.triggerRefresh();
+
+    await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledTimes(2));
+  });
+
+  it('annule le rafraîchissement périodique à l’arrêt', async () => {
+    const harness = createAccessoryHarness();
+
+    await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+    harness.controller.getState.mockClear();
+    harness.shutdown();
+    harness.triggerRefresh();
+
+    expect(harness.cancelInterval).toHaveBeenCalledOnce();
+    expect(harness.controller.getState).not.toHaveBeenCalled();
+  });
+
+  it('distingue une erreur de rafraîchissement d’une erreur de lecture initiale', async () => {
+    const harness = createAccessoryHarness();
+
+    await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+    harness.controller.getState.mockRejectedValue(new Error('Lecture impossible'));
+    harness.triggerRefresh();
+
+    await vi.waitFor(() =>
+      expect(harness.logError).toHaveBeenCalledWith(
+        'Impossible de rafraîchir l’état de la PAC : %s',
+        'Lecture impossible',
+      ),
+    );
+  });
+
   it.each([
     [0, HvacMode.Auto],
     [1, HvacMode.Heat],

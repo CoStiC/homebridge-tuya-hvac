@@ -7,6 +7,10 @@ import type { TuyaHvacPlatform } from '../platform.js';
 
 export class HeaterCoolerAccessory {
   private readonly service: Service;
+  private readonly refreshTimer: ReturnType<typeof setInterval>;
+  private refreshInProgress = false;
+  private shutdownRequested = false;
+  private initialStateSynchronized = false;
   private activeRequestId = 0;
   private activeWorkerRunning = false;
   private pendingActiveRequest:
@@ -23,6 +27,8 @@ export class HeaterCoolerAccessory {
     private readonly platform: TuyaHvacPlatform,
     private readonly accessory: PlatformAccessory,
     private readonly controller: HvacController,
+    private readonly scheduleInterval: typeof setInterval = setInterval,
+    private readonly cancelInterval: typeof clearInterval = clearInterval,
   ) {
     this.accessory
       .getService(this.platform.Service.AccessoryInformation)!
@@ -100,27 +106,67 @@ export class HeaterCoolerAccessory {
         void this.setModeInBackground(mode, requestId);
       });
 
-    void this.refreshState();
+    void this.refreshStateIfIdle();
+
+    this.refreshTimer = this.scheduleInterval(
+      () => void this.refreshStateIfIdle(),
+      this.platform.config.refreshIntervalSeconds * 1000,
+    );
   }
 
-  private async refreshState(): Promise<void> {
+  public shutdown(): void {
+    this.shutdownRequested = true;
+    this.cancelInterval(this.refreshTimer);
+  }
+
+  private async refreshStateIfIdle(): Promise<void> {
+    if (this.shutdownRequested) {
+      return;
+    }
+
+    if (this.refreshInProgress) {
+      this.platform.log.debug('Rafraîchissement ignoré : une lecture est déjà en cours.');
+      return;
+    }
+
+    this.refreshInProgress = true;
+
     try {
       const state = await this.controller.getState();
 
+      if (this.shutdownRequested) {
+        return;
+      }
+
       this.applyState(state);
 
-      this.platform.log.info(
-        'État initial synchronisé : active=%s, température=%s °C, consigne=%s °C, mode=%s',
-        state.active,
-        state.currentTemperature,
-        state.targetTemperature,
-        state.mode,
-      );
+      if (this.initialStateSynchronized) {
+        this.platform.log.debug(
+          'État périodique synchronisé : active=%s, température=%s °C, consigne=%s °C, mode=%s',
+          state.active,
+          state.currentTemperature,
+          state.targetTemperature,
+          state.mode,
+        );
+      } else {
+        this.initialStateSynchronized = true;
+        this.platform.log.info(
+          'État initial synchronisé : active=%s, température=%s °C, consigne=%s °C, mode=%s',
+          state.active,
+          state.currentTemperature,
+          state.targetTemperature,
+          state.mode,
+        );
+      }
     } catch (error) {
       this.platform.log.error(
-        'Impossible de lire l’état initial de la PAC : %s',
+        this.initialStateSynchronized
+          ? 'Impossible de rafraîchir l’état de la PAC : %s'
+          : 'Impossible de lire l’état initial de la PAC : %s',
         error instanceof Error ? error.message : String(error),
       );
+    } finally {
+      this.refreshInProgress = false;
     }
   }
 
