@@ -4,6 +4,7 @@
 
 ### Added
 
+- Minimal local npm package with a root user guide and documented installation procedure.
 - Confirmed independent ON/OFF control through HomeKit `HeaterCooler.Active`.
 - Background HomeKit commands with latest-intention coalescing.
 - Confirmed DP4 mode pipeline for HomeKit AUTO, HEAT and COOL, validated end to end with the real device.
