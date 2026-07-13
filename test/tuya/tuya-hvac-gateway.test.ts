@@ -251,6 +251,74 @@ describe('TuyaHvacGateway', () => {
     expect(wait).toHaveBeenCalledTimes(9);
   });
 
+  it('ne transmet aucune écriture de mode lorsque DP4 est déjà dans le mode demandé', async () => {
+    const client = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn(),
+      setDp: vi.fn().mockResolvedValue(undefined),
+      getStatus: vi.fn().mockResolvedValue({ '1': false, '2': 30, '3': 31, '4': 'heat' }),
+    } as unknown as TuyaClient;
+    const gateway = new TuyaHvacGateway(client);
+
+    await expect(gateway.setMode(HvacMode.Heat)).resolves.toMatchObject({ mode: HvacMode.Heat });
+
+    expect(client.getStatus).toHaveBeenCalledOnce();
+    expect(client.setDp).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [HvacMode.Auto, HvacMode.Heat],
+    [HvacMode.Heat, HvacMode.Auto],
+    [HvacMode.Cool, HvacMode.Auto],
+  ])(
+    'écrit DP4=%s et retourne le mode confirmé dans un état complet',
+    async (mode, initialMode) => {
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn(),
+        setDp: vi.fn().mockResolvedValue(undefined),
+        getStatus: vi
+          .fn()
+          .mockResolvedValueOnce({ '1': false, '2': 30, '3': 31, '4': initialMode })
+          .mockResolvedValueOnce({ '1': false, '2': 30, '3': 31, '4': mode }),
+      } as unknown as TuyaClient;
+      const gateway = new TuyaHvacGateway(client);
+
+      await expect(gateway.setMode(mode)).resolves.toEqual({
+        active: false,
+        targetTemperature: 30,
+        currentTemperature: 31,
+        mode,
+      });
+
+      expect(client.setDp).toHaveBeenCalledOnce();
+      expect(client.setDp).toHaveBeenCalledWith(4, mode);
+      expect(client.getStatus).toHaveBeenCalledTimes(2);
+      expect(client.connect).toHaveBeenCalledTimes(3);
+      expect(client.disconnect).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it('rejette un mode non confirmé après deux écritures', async () => {
+    const client = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn(),
+      setDp: vi.fn().mockRejectedValue(new Error('Timeout écriture')),
+      getStatus: vi.fn().mockResolvedValue({ '1': false, '2': 30, '3': 31, '4': 'auto' }),
+    } as unknown as TuyaClient;
+    const wait = vi.fn().mockResolvedValue(undefined);
+    const gateway = new TuyaHvacGateway(client, wait);
+
+    await expect(gateway.setMode(HvacMode.Heat)).rejects.toThrow(
+      'Commande de mode non confirmée après 2 écritures et 5 lectures par écriture',
+    );
+
+    expect(client.setDp).toHaveBeenCalledTimes(2);
+    expect(client.setDp).toHaveBeenCalledWith(4, HvacMode.Heat);
+    expect(client.getStatus).toHaveBeenCalledTimes(11);
+    expect(wait).toHaveBeenCalledTimes(9);
+  });
+
   it('sérialise deux transactions concurrentes', async () => {
     let releaseFirstRead: (() => void) | undefined;
     const firstRead = new Promise<Record<string, unknown>>((resolve) => {

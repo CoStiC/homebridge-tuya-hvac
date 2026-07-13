@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type { HvacGateway } from '../domain/hvac-gateway.js';
+import type { HvacMode } from '../domain/hvac-mode.js';
 import type { HvacState } from '../domain/hvac-state.js';
 import { IVW_INVERTER_10_PROFILE, mapIvwInverter10DpsToState } from './ivw-inverter-10-profile.js';
 import type { TuyaClient, TuyaDps } from './tuya-client.js';
@@ -64,6 +65,43 @@ export class TuyaHvacGateway implements HvacGateway {
     });
   }
 
+  public setMode(mode: HvacMode): Promise<HvacState> {
+    return this.runExclusive(async () => {
+      const currentState = await this.tryReadStateBeforeWrite();
+
+      if (currentState?.mode === mode) {
+        return currentState;
+      }
+
+      let lastWriteError: unknown;
+
+      for (let writeAttempt = 1; writeAttempt <= WRITE_ATTEMPTS; writeAttempt += 1) {
+        const writeResult = await this.tryWriteMode(mode);
+
+        lastWriteError = writeResult.error;
+
+        const confirmation = await this.tryConfirmMode(mode);
+
+        if (confirmation.state !== undefined) {
+          return confirmation.state;
+        }
+
+        if (writeAttempt < WRITE_ATTEMPTS) {
+          await this.wait(CONFIRMATION_DELAY_MS);
+        } else {
+          throw this.createModeConfirmationError(
+            mode,
+            confirmation.lastState,
+            confirmation.lastReadError,
+            lastWriteError,
+          );
+        }
+      }
+
+      throw new Error('État interne invalide pendant la commande de mode.');
+    });
+  }
+
   private async tryReadStateBeforeWrite(): Promise<HvacState | undefined> {
     try {
       return await this.readStateInNewConnection();
@@ -88,6 +126,19 @@ export class TuyaHvacGateway implements HvacGateway {
        * Un timeout d’écriture ne prouve pas que la commande n’a pas été
        * appliquée. La relecture du périphérique reste la source de vérité.
        */
+      return { error };
+    } finally {
+      this.client.disconnect();
+    }
+  }
+
+  private async tryWriteMode(mode: HvacMode): Promise<WriteAttemptResult> {
+    try {
+      await this.client.connect();
+      await this.client.setDp(Number(IVW_INVERTER_10_PROFILE.dps.mode), mode);
+
+      return {};
+    } catch (error) {
       return { error };
     } finally {
       this.client.disconnect();
@@ -125,6 +176,36 @@ export class TuyaHvacGateway implements HvacGateway {
       lastState,
       lastReadError,
     };
+  }
+
+  private async tryConfirmMode(expectedMode: HvacMode): Promise<{
+    readonly state?: HvacState;
+    readonly lastState?: HvacState;
+    readonly lastReadError?: unknown;
+  }> {
+    let lastState: HvacState | undefined;
+    let lastReadError: unknown;
+
+    for (let attempt = 1; attempt <= CONFIRMATION_ATTEMPTS; attempt += 1) {
+      if (attempt > 1) {
+        await this.wait(CONFIRMATION_DELAY_MS);
+      }
+
+      try {
+        const state = await this.readStateInNewConnection();
+
+        lastState = state;
+        lastReadError = undefined;
+
+        if (state.mode === expectedMode) {
+          return { state };
+        }
+      } catch (error) {
+        lastReadError = error;
+      }
+    }
+
+    return { lastState, lastReadError };
   }
 
   private async readStateInNewConnection(): Promise<HvacState> {
@@ -176,6 +257,33 @@ export class TuyaHvacGateway implements HvacGateway {
 
     return new Error(
       `Impossible de confirmer la commande ON/OFF après ` +
+        `${WRITE_ATTEMPTS} écritures : ${this.formatError(lastReadError)}.` +
+        writeContext,
+    );
+  }
+
+  private createModeConfirmationError(
+    expectedMode: HvacMode,
+    lastState: HvacState | undefined,
+    lastReadError: unknown,
+    lastWriteError: unknown,
+  ): Error {
+    const writeContext =
+      lastWriteError === undefined
+        ? ''
+        : ` Dernière erreur d’écriture : ${this.formatError(lastWriteError)}.`;
+
+    if (lastState !== undefined) {
+      return new Error(
+        `Commande de mode non confirmée après ${WRITE_ATTEMPTS} écritures et ` +
+          `${CONFIRMATION_ATTEMPTS} lectures par écriture : ` +
+          `mode attendu=${expectedMode}, mode reçu=${lastState.mode}.` +
+          writeContext,
+      );
+    }
+
+    return new Error(
+      `Impossible de confirmer la commande de mode après ` +
         `${WRITE_ATTEMPTS} écritures : ${this.formatError(lastReadError)}.` +
         writeContext,
     );

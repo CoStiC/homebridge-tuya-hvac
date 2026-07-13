@@ -7,12 +7,12 @@ import type { HvacState } from '../../src/domain/hvac-state.js';
 import { HeaterCoolerAccessory } from '../../src/homekit/heater-cooler-accessory.js';
 import type { TuyaHvacPlatform } from '../../src/platform.js';
 
-function state(active: boolean): HvacState {
+function state(active: boolean, mode: HvacMode = HvacMode.Auto): HvacState {
   return {
     active,
     currentTemperature: 28,
     targetTemperature: 30,
-    mode: HvacMode.Auto,
+    mode,
   };
 }
 
@@ -36,10 +36,17 @@ function createAccessoryHarness(): {
   readonly controller: {
     readonly getState: ReturnType<typeof vi.fn>;
     readonly setActive: ReturnType<typeof vi.fn>;
+    readonly setMode: ReturnType<typeof vi.fn>;
   };
   readonly triggerActive: (value: number) => void;
+  readonly triggerMode: (value: number) => void;
   readonly updateCharacteristic: ReturnType<typeof vi.fn>;
   readonly activeCharacteristic: { readonly ACTIVE: number; readonly INACTIVE: number };
+  readonly targetCharacteristic: {
+    readonly AUTO: number;
+    readonly HEAT: number;
+    readonly COOL: number;
+  };
 } {
   const activeCharacteristic = { ACTIVE: 1, INACTIVE: 0 };
   const characteristics = {
@@ -59,16 +66,35 @@ function createAccessoryHarness(): {
     HeaterCooler: Symbol('HeaterCooler'),
   };
   let activeHandler: ((value: number) => void) | undefined;
-  const characteristic = {
+  let modeHandler: ((value: number) => void) | undefined;
+  const activeHandlerCharacteristic = {
     onSet: vi.fn((handler: (value: number) => void) => {
       activeHandler = handler;
-      return characteristic;
+      return activeHandlerCharacteristic;
     }),
-    setProps: vi.fn(() => characteristic),
-    updateValue: vi.fn(() => characteristic),
+  };
+  const modeHandlerCharacteristic = {
+    onSet: vi.fn((handler: (value: number) => void) => {
+      modeHandler = handler;
+      return modeHandlerCharacteristic;
+    }),
+  };
+  const thresholdCharacteristic = {
+    setProps: vi.fn(() => thresholdCharacteristic),
+    updateValue: vi.fn(() => thresholdCharacteristic),
   };
   const service = {
-    getCharacteristic: vi.fn(() => characteristic),
+    getCharacteristic: vi.fn((requestedCharacteristic: unknown) => {
+      if (requestedCharacteristic === characteristics.Active) {
+        return activeHandlerCharacteristic;
+      }
+
+      if (requestedCharacteristic === characteristics.TargetHeaterCoolerState) {
+        return modeHandlerCharacteristic;
+      }
+
+      return thresholdCharacteristic;
+    }),
     setCharacteristic: vi.fn(() => service),
     updateCharacteristic: vi.fn(() => service),
   };
@@ -84,6 +110,7 @@ function createAccessoryHarness(): {
   const controller = {
     getState: vi.fn().mockResolvedValue(state(false)),
     setActive: vi.fn(),
+    setMode: vi.fn(),
   };
   const platform = {
     api: { hap: { Characteristic: characteristics } },
@@ -108,12 +135,35 @@ function createAccessoryHarness(): {
 
       activeHandler(value);
     },
+    triggerMode: (value: number) => {
+      if (modeHandler === undefined) {
+        throw new Error('Handler TargetHeaterCoolerState non enregistré.');
+      }
+
+      modeHandler(value);
+    },
     updateCharacteristic: service.updateCharacteristic,
     activeCharacteristic,
+    targetCharacteristic: characteristics.TargetHeaterCoolerState,
   };
 }
 
 describe('HeaterCoolerAccessory', () => {
+  it.each([
+    [0, HvacMode.Auto],
+    [1, HvacMode.Heat],
+    [2, HvacMode.Cool],
+  ])('traduit le mode HomeKit %s en %s', async (homeKitMode, domainMode) => {
+    const harness = createAccessoryHarness();
+
+    await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+    harness.controller.setMode.mockResolvedValue(state(false, domainMode));
+
+    harness.triggerMode(homeKitMode);
+
+    await vi.waitFor(() => expect(harness.controller.setMode).toHaveBeenCalledWith(domainMode));
+  });
+
   it('remplace les demandes intermédiaires et applique seulement la dernière intention', async () => {
     const harness = createAccessoryHarness();
     const firstCommand = deferred<HvacState>();
@@ -164,5 +214,36 @@ describe('HeaterCoolerAccessory', () => {
     expect(harness.controller.setActive).toHaveBeenNthCalledWith(1, true);
     expect(harness.controller.setActive).toHaveBeenNthCalledWith(2, false);
     expect(harness.controller.getState).not.toHaveBeenCalled();
+  });
+
+  it('traduit et coalesce les demandes HomeKit de mode', async () => {
+    const harness = createAccessoryHarness();
+    const firstCommand = deferred<HvacState>();
+
+    await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+    harness.updateCharacteristic.mockClear();
+    harness.controller.setMode
+      .mockReturnValueOnce(firstCommand.promise)
+      .mockResolvedValueOnce(state(false, HvacMode.Cool));
+
+    harness.triggerMode(harness.targetCharacteristic.HEAT);
+    harness.triggerMode(harness.targetCharacteristic.AUTO);
+    harness.triggerMode(harness.targetCharacteristic.COOL);
+
+    expect(harness.controller.setMode).toHaveBeenCalledOnce();
+    expect(harness.controller.setMode).toHaveBeenCalledWith(HvacMode.Heat);
+
+    firstCommand.resolve(state(false, HvacMode.Heat));
+
+    await vi.waitFor(() => expect(harness.controller.setMode).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(harness.updateCharacteristic).toHaveBeenCalledWith(
+        harness.targetCharacteristic,
+        harness.targetCharacteristic.COOL,
+      ),
+    );
+
+    expect(harness.controller.setMode).toHaveBeenNthCalledWith(2, HvacMode.Cool);
+    expect(harness.controller.setMode).not.toHaveBeenCalledWith(HvacMode.Auto);
   });
 });

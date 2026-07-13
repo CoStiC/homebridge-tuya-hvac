@@ -11,6 +11,9 @@ export class HeaterCoolerAccessory {
   private activeWorkerRunning = false;
   private pendingActiveRequest:
     { readonly active: boolean; readonly requestId: number } | undefined;
+  private modeRequestId = 0;
+  private modeWorkerRunning = false;
+  private pendingModeRequest: { readonly mode: HvacMode; readonly requestId: number } | undefined;
 
   public constructor(
     private readonly platform: TuyaHvacPlatform,
@@ -70,6 +73,15 @@ export class HeaterCoolerAccessory {
       this.platform.log.info('[#%d] Commande Active reçue → %s.', requestId, active ? 'ON' : 'OFF');
       void this.setActiveInBackground(active, requestId);
     });
+
+    this.service
+      .getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
+      .onSet((value) => {
+        const mode = this.fromTargetHeaterCoolerState(value);
+        const requestId = ++this.modeRequestId;
+        this.platform.log.info('[mode #%d] Commande reçue → %s.', requestId, mode);
+        void this.setModeInBackground(mode, requestId);
+      });
 
     void this.refreshState();
   }
@@ -179,6 +191,85 @@ export class HeaterCoolerAccessory {
     }
   }
 
+  private async setModeInBackground(mode: HvacMode, requestId: number): Promise<void> {
+    this.pendingModeRequest = { mode, requestId };
+
+    if (this.modeWorkerRunning) {
+      return;
+    }
+
+    this.modeWorkerRunning = true;
+
+    try {
+      while (this.pendingModeRequest !== undefined) {
+        const request = this.pendingModeRequest;
+
+        this.pendingModeRequest = undefined;
+        await this.processModeRequest(request.mode, request.requestId);
+      }
+    } finally {
+      this.modeWorkerRunning = false;
+    }
+  }
+
+  private async processModeRequest(mode: HvacMode, requestId: number): Promise<void> {
+    try {
+      const state = await this.controller.setMode(mode);
+      const pendingRequest = this.pendingModeRequest;
+
+      if (pendingRequest?.mode === state.mode) {
+        this.pendingModeRequest = undefined;
+        this.applyConfirmedModeState(state, pendingRequest.requestId);
+      } else if (requestId === this.modeRequestId) {
+        this.applyConfirmedModeState(state, requestId);
+      } else {
+        this.platform.log.debug('[mode #%d] Résultat obsolète ignoré.', requestId);
+      }
+    } catch (error) {
+      this.platform.log.error(
+        '[mode #%d] Impossible de modifier le mode de la PAC : %s',
+        requestId,
+        error instanceof Error ? error.message : String(error),
+      );
+
+      if (requestId !== this.modeRequestId || this.pendingModeRequest !== undefined) {
+        this.platform.log.debug('[mode #%d] Resynchronisation obsolète ignorée.', requestId);
+        return;
+      }
+
+      await this.restoreModeStateAfterFailure(requestId);
+    }
+  }
+
+  private applyConfirmedModeState(state: HvacState, requestId: number): void {
+    this.applyState(state);
+    this.platform.log.info('[mode #%d] Commande → %s confirmée.', requestId, state.mode);
+  }
+
+  private async restoreModeStateAfterFailure(requestId: number): Promise<void> {
+    try {
+      const actualState = await this.controller.getState();
+
+      if (requestId !== this.modeRequestId || this.pendingModeRequest !== undefined) {
+        this.platform.log.debug('[mode #%d] État restauré obsolète ignoré.', requestId);
+        return;
+      }
+
+      this.applyState(actualState);
+      this.platform.log.info(
+        '[mode #%d] État réel restauré après échec : mode=%s.',
+        requestId,
+        actualState.mode,
+      );
+    } catch (refreshError) {
+      this.platform.log.error(
+        '[mode #%d] Impossible de resynchroniser l’état après échec : %s',
+        requestId,
+        refreshError instanceof Error ? refreshError.message : String(refreshError),
+      );
+    }
+  }
+
   private applyState(state: HvacState): void {
     this.service
       .updateCharacteristic(
@@ -225,6 +316,22 @@ export class HeaterCoolerAccessory {
       case HvacMode.PowerfulCool:
       case HvacMode.SilentCool:
         return this.platform.Characteristic.TargetHeaterCoolerState.COOL;
+    }
+  }
+
+  private fromTargetHeaterCoolerState(value: unknown): HvacMode {
+    switch (value) {
+      case this.platform.Characteristic.TargetHeaterCoolerState.AUTO:
+        return HvacMode.Auto;
+
+      case this.platform.Characteristic.TargetHeaterCoolerState.HEAT:
+        return HvacMode.Heat;
+
+      case this.platform.Characteristic.TargetHeaterCoolerState.COOL:
+        return HvacMode.Cool;
+
+      default:
+        throw new Error(`État cible HomeKit non pris en charge : ${String(value)}.`);
     }
   }
 }
