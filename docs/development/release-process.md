@@ -1,6 +1,10 @@
 # Release process
 
-The first public version is published under the npm `beta` dist-tag. The package `publishConfig` pins the public registry, public access and `beta` tag so an unqualified `npm publish` cannot update `latest` accidentally.
+The first public version is published under the npm `beta` dist-tag. The package
+`publishConfig` pins the public registry and public access. Always pass the
+intended dist-tag explicitly on the command line: npm assigned both `beta` and
+`latest` to version `0.1.0` during the first publication despite the package
+configuration.
 
 ## Prerequisites
 
@@ -75,8 +79,13 @@ npm view homebridge-tuya-hvac@beta
 npm install homebridge-tuya-hvac@beta
 ```
 
-If version 0.1.0 is accepted unchanged as the stable release, promote the existing artifact instead of publishing the same version again:
+Before promoting a beta, inspect the current tags:
 
 ```bash
-npm dist-tag add homebridge-tuya-hvac@0.1.0 latest
+npm dist-tag ls homebridge-tuya-hvac
 ```
+
+Version `0.1.0` already has both the `beta` and `latest` tags because npm assigned
+`latest` during the initial publication. A future stable-release decision must
+therefore be recorded explicitly; do not assume that the presence of `latest`
+means the beta has completed real-production validation.

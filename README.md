@@ -13,13 +13,15 @@ The current device profile supports the IVW Inverter 10 swimming-pool heat pump 
 
 ## Beta installation
 
-After the first beta is published, install it explicitly through the `beta` dist-tag:
+Install the first public beta explicitly through the `beta` dist-tag:
 
 ```bash
 npm install homebridge-tuya-hvac@beta
 ```
 
-The unqualified command `npm install homebridge-tuya-hvac` will not select the beta while no `latest` dist-tag has been assigned.
+npm assigned both the `beta` and `latest` dist-tags to version `0.1.0` during the
+first publication. Use `@beta` to make the intended release channel explicit
+until the project deliberately promotes a stable release.
 
 ## Local package installation
 
