@@ -174,6 +174,7 @@ interface HvacGateway {
   getState(): Promise<HvacState>;
   setActive(active: boolean): Promise<HvacState>;
   setMode(mode: HvacMode): Promise<HvacState>;
+  setTargetTemperature(value: number): Promise<HvacState>;
 }
 ```
 

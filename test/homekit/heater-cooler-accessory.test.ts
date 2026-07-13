@@ -7,11 +7,11 @@ import type { HvacState } from '../../src/domain/hvac-state.js';
 import { HeaterCoolerAccessory } from '../../src/homekit/heater-cooler-accessory.js';
 import type { TuyaHvacPlatform } from '../../src/platform.js';
 
-function state(active: boolean, mode: HvacMode = HvacMode.Auto): HvacState {
+function state(active: boolean, mode: HvacMode = HvacMode.Auto, targetTemperature = 30): HvacState {
   return {
     active,
     currentTemperature: 28,
-    targetTemperature: 30,
+    targetTemperature,
     mode,
   };
 }
@@ -37,9 +37,12 @@ function createAccessoryHarness(): {
     readonly getState: ReturnType<typeof vi.fn>;
     readonly setActive: ReturnType<typeof vi.fn>;
     readonly setMode: ReturnType<typeof vi.fn>;
+    readonly setTargetTemperature: ReturnType<typeof vi.fn>;
   };
   readonly triggerActive: (value: number) => void;
   readonly triggerMode: (value: number) => void;
+  readonly triggerHeatingThreshold: (value: number) => void;
+  readonly triggerCoolingThreshold: (value: number) => void;
   readonly updateCharacteristic: ReturnType<typeof vi.fn>;
   readonly activeCharacteristic: { readonly ACTIVE: number; readonly INACTIVE: number };
   readonly targetCharacteristic: {
@@ -67,6 +70,8 @@ function createAccessoryHarness(): {
   };
   let activeHandler: ((value: number) => void) | undefined;
   let modeHandler: ((value: number) => void) | undefined;
+  let heatingThresholdHandler: ((value: number) => void) | undefined;
+  let coolingThresholdHandler: ((value: number) => void) | undefined;
   const activeHandlerCharacteristic = {
     onSet: vi.fn((handler: (value: number) => void) => {
       activeHandler = handler;
@@ -79,9 +84,29 @@ function createAccessoryHarness(): {
       return modeHandlerCharacteristic;
     }),
   };
-  const thresholdCharacteristic = {
-    setProps: vi.fn(() => thresholdCharacteristic),
-    updateValue: vi.fn(() => thresholdCharacteristic),
+  const createThresholdCharacteristic = (
+    setHandler: (handler: (value: number) => void) => void,
+  ) => {
+    const characteristic = {
+      onSet: vi.fn((handler: (value: number) => void) => {
+        setHandler(handler);
+        return characteristic;
+      }),
+      setProps: vi.fn(() => characteristic),
+      updateValue: vi.fn(() => characteristic),
+    };
+
+    return characteristic;
+  };
+  const heatingThresholdCharacteristic = createThresholdCharacteristic((handler) => {
+    heatingThresholdHandler = handler;
+  });
+  const coolingThresholdCharacteristic = createThresholdCharacteristic((handler) => {
+    coolingThresholdHandler = handler;
+  });
+  const readOnlyCharacteristic = {
+    setProps: vi.fn(() => readOnlyCharacteristic),
+    updateValue: vi.fn(() => readOnlyCharacteristic),
   };
   const service = {
     getCharacteristic: vi.fn((requestedCharacteristic: unknown) => {
@@ -93,7 +118,15 @@ function createAccessoryHarness(): {
         return modeHandlerCharacteristic;
       }
 
-      return thresholdCharacteristic;
+      if (requestedCharacteristic === characteristics.HeatingThresholdTemperature) {
+        return heatingThresholdCharacteristic;
+      }
+
+      if (requestedCharacteristic === characteristics.CoolingThresholdTemperature) {
+        return coolingThresholdCharacteristic;
+      }
+
+      return readOnlyCharacteristic;
     }),
     setCharacteristic: vi.fn(() => service),
     updateCharacteristic: vi.fn(() => service),
@@ -111,6 +144,7 @@ function createAccessoryHarness(): {
     getState: vi.fn().mockResolvedValue(state(false)),
     setActive: vi.fn(),
     setMode: vi.fn(),
+    setTargetTemperature: vi.fn(),
   };
   const platform = {
     api: { hap: { Characteristic: characteristics } },
@@ -141,6 +175,20 @@ function createAccessoryHarness(): {
       }
 
       modeHandler(value);
+    },
+    triggerHeatingThreshold: (value: number) => {
+      if (heatingThresholdHandler === undefined) {
+        throw new Error('Handler HeatingThresholdTemperature non enregistré.');
+      }
+
+      heatingThresholdHandler(value);
+    },
+    triggerCoolingThreshold: (value: number) => {
+      if (coolingThresholdHandler === undefined) {
+        throw new Error('Handler CoolingThresholdTemperature non enregistré.');
+      }
+
+      coolingThresholdHandler(value);
     },
     updateCharacteristic: service.updateCharacteristic,
     activeCharacteristic,
@@ -245,5 +293,55 @@ describe('HeaterCoolerAccessory', () => {
 
     expect(harness.controller.setMode).toHaveBeenNthCalledWith(2, HvacMode.Cool);
     expect(harness.controller.setMode).not.toHaveBeenCalledWith(HvacMode.Auto);
+  });
+
+  it.each(['heating', 'cooling'] as const)(
+    'traduit le seuil %s en commande de consigne unique',
+    async (threshold) => {
+      const harness = createAccessoryHarness();
+
+      await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+      harness.controller.setTargetTemperature.mockResolvedValue(state(false, HvacMode.Auto, 29));
+
+      if (threshold === 'heating') {
+        harness.triggerHeatingThreshold(29);
+      } else {
+        harness.triggerCoolingThreshold(29);
+      }
+
+      await vi.waitFor(() =>
+        expect(harness.controller.setTargetTemperature).toHaveBeenCalledWith(29),
+      );
+    },
+  );
+
+  it('coalesce les demandes rapides de consigne et applique seulement la dernière', async () => {
+    const harness = createAccessoryHarness();
+    const firstCommand = deferred<HvacState>();
+
+    await vi.waitFor(() => expect(harness.controller.getState).toHaveBeenCalledOnce());
+    harness.updateCharacteristic.mockClear();
+    harness.controller.setTargetTemperature
+      .mockReturnValueOnce(firstCommand.promise)
+      .mockResolvedValueOnce(state(false, HvacMode.Auto, 27));
+
+    harness.triggerHeatingThreshold(29);
+    harness.triggerCoolingThreshold(28);
+    harness.triggerHeatingThreshold(27);
+
+    expect(harness.controller.setTargetTemperature).toHaveBeenCalledOnce();
+    expect(harness.controller.setTargetTemperature).toHaveBeenCalledWith(29);
+
+    firstCommand.resolve(state(false, HvacMode.Auto, 29));
+
+    await vi.waitFor(() =>
+      expect(harness.controller.setTargetTemperature).toHaveBeenCalledTimes(2),
+    );
+    await vi.waitFor(() =>
+      expect(harness.updateCharacteristic).toHaveBeenCalledWith(expect.anything(), 27),
+    );
+
+    expect(harness.controller.setTargetTemperature).toHaveBeenNthCalledWith(2, 27);
+    expect(harness.controller.setTargetTemperature).not.toHaveBeenCalledWith(28);
   });
 });

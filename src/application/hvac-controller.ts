@@ -16,4 +16,8 @@ export class HvacController {
   public setMode(mode: HvacMode): Promise<HvacState> {
     return this.gateway.setMode(mode);
   }
+
+  public setTargetTemperature(value: number): Promise<HvacState> {
+    return this.gateway.setTargetTemperature(value);
+  }
 }

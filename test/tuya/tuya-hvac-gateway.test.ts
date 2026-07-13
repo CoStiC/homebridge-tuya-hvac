@@ -319,6 +319,112 @@ describe('TuyaHvacGateway', () => {
     expect(wait).toHaveBeenCalledTimes(9);
   });
 
+  it('ne transmet aucune écriture de consigne lorsque DP2 est déjà à la valeur demandée', async () => {
+    const client = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn(),
+      setDp: vi.fn().mockResolvedValue(undefined),
+      getStatus: vi.fn().mockResolvedValue({ '1': false, '2': 30, '3': 31, '4': 'auto' }),
+    } as unknown as TuyaClient;
+    const gateway = new TuyaHvacGateway(client);
+
+    await expect(gateway.setTargetTemperature(30)).resolves.toMatchObject({
+      targetTemperature: 30,
+    });
+
+    expect(client.getStatus).toHaveBeenCalledOnce();
+    expect(client.setDp).not.toHaveBeenCalled();
+  });
+
+  it('écrit DP2 et retourne la consigne confirmée dans un état complet', async () => {
+    const client = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn(),
+      setDp: vi.fn().mockResolvedValue(undefined),
+      getStatus: vi
+        .fn()
+        .mockResolvedValueOnce({ '1': false, '2': 30, '3': 31, '4': 'auto' })
+        .mockResolvedValueOnce({ '1': false, '2': 29, '3': 31, '4': 'auto' }),
+    } as unknown as TuyaClient;
+    const gateway = new TuyaHvacGateway(client);
+
+    await expect(gateway.setTargetTemperature(29)).resolves.toEqual({
+      active: false,
+      targetTemperature: 29,
+      currentTemperature: 31,
+      mode: HvacMode.Auto,
+    });
+
+    expect(client.setDp).toHaveBeenCalledOnce();
+    expect(client.setDp).toHaveBeenCalledWith(2, 29);
+    expect(client.getStatus).toHaveBeenCalledTimes(2);
+    expect(client.connect).toHaveBeenCalledTimes(3);
+    expect(client.disconnect).toHaveBeenCalledTimes(3);
+  });
+
+  it('relit la consigne après une première réponse de confirmation partielle', async () => {
+    const client = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn(),
+      setDp: vi.fn().mockResolvedValue(undefined),
+      getStatus: vi
+        .fn()
+        .mockResolvedValueOnce({ '1': false, '2': 30, '3': 31, '4': 'auto' })
+        .mockResolvedValueOnce({ '2': 29 })
+        .mockResolvedValueOnce({ '1': false, '2': 29, '3': 31, '4': 'auto' }),
+    } as unknown as TuyaClient;
+    const wait = vi.fn().mockResolvedValue(undefined);
+    const gateway = new TuyaHvacGateway(client, wait);
+
+    await expect(gateway.setTargetTemperature(29)).resolves.toMatchObject({
+      targetTemperature: 29,
+    });
+
+    expect(client.setDp).toHaveBeenCalledOnce();
+    expect(client.getStatus).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledOnce();
+  });
+
+  it('rejette une consigne non confirmée après deux écritures', async () => {
+    const client = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn(),
+      setDp: vi.fn().mockRejectedValue(new Error('Timeout écriture')),
+      getStatus: vi.fn().mockResolvedValue({ '1': false, '2': 30, '3': 31, '4': 'auto' }),
+    } as unknown as TuyaClient;
+    const wait = vi.fn().mockResolvedValue(undefined);
+    const gateway = new TuyaHvacGateway(client, wait);
+
+    await expect(gateway.setTargetTemperature(29)).rejects.toThrow(
+      'Commande de consigne non confirmée après 2 écritures et 5 lectures par écriture',
+    );
+
+    expect(client.setDp).toHaveBeenCalledTimes(2);
+    expect(client.setDp).toHaveBeenCalledWith(2, 29);
+    expect(client.getStatus).toHaveBeenCalledTimes(11);
+    expect(wait).toHaveBeenCalledTimes(9);
+  });
+
+  it.each([7, 33, 29.5])(
+    'rejette la consigne hors capacités %s sans accès au client',
+    async (value) => {
+      const client = {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        setDp: vi.fn(),
+        getStatus: vi.fn(),
+      } as unknown as TuyaClient;
+      const gateway = new TuyaHvacGateway(client);
+
+      await expect(gateway.setTargetTemperature(value)).rejects.toThrow(
+        'Consigne invalide : valeur entière attendue entre 8 et 32 °C.',
+      );
+
+      expect(client.connect).not.toHaveBeenCalled();
+      expect(client.setDp).not.toHaveBeenCalled();
+    },
+  );
+
   it('sérialise deux transactions concurrentes', async () => {
     let releaseFirstRead: (() => void) | undefined;
     const firstRead = new Promise<Record<string, unknown>>((resolve) => {

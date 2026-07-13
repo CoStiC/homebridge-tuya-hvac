@@ -210,11 +210,17 @@ V1 maps HomeKit `AUTO` directly to the domain `Auto` mode and the Tuya profile v
 
 HomeKit exposes separate heating and cooling thresholds in automatic mode. V1 does not implement a two-setpoint control rule: both threshold characteristics reflect the device's single validated target temperature. Double-setpoint behavior requires separate device validation and is outside the current increment.
 
+Both `HeatingThresholdTemperature` and `CoolingThresholdTemperature` therefore express the same user intention in V1. Changing either characteristic calls `setTargetTemperature(value)`. The adapter coalesces rapid changes across both characteristics and applies only the complete state confirmed by the device.
+
+An interaction that changes power, mode and target temperature may cause the Home application to emit several independent requests. They are accepted immediately by their HomeKit workers, then serialized by the Tuya gateway. Confirmed results remain authoritative, but the application may display intermediate states until the complete sequence has settled.
+
 ---
 
 # Temperature
 
 The project currently uses Celsius.
+
+The V1 HomeKit characteristics expose the validated device range from 8 to 32 °C with a 1 °C step. Fractional values are not sent to the device.
 
 Temperature conversions, if required, belong to the business layer.
 

@@ -27,3 +27,7 @@ The V1 values `auto`, `heat` and `cool` were also validated end to end from the 
 - maximum: 32 °C
 - step: 1 °C
 - one device setpoint; no validated independent heating/cooling setpoints
+
+DP2 accepts and confirms integer values in this range. Values outside the range are clamped by the device, so the adapter rejects them before writing rather than accepting a different confirmed value. A 29.5 °C experiment produced an unexplained DP2 value of 32 °C; fractional writes are therefore rejected in V1.
+
+The confirmed-write pipeline for DP2 uses a complete pre-read, skips redundant writes, then requires a complete status response whose target temperature exactly matches the requested value. It was validated end to end through HomeKit with the sequence 30 → 29 → 31 → 30 °C on the real device.

@@ -102,6 +102,45 @@ export class TuyaHvacGateway implements HvacGateway {
     });
   }
 
+  public setTargetTemperature(value: number): Promise<HvacState> {
+    return this.runExclusive(async () => {
+      this.validateTargetTemperature(value);
+
+      const currentState = await this.tryReadStateBeforeWrite();
+
+      if (currentState?.targetTemperature === value) {
+        return currentState;
+      }
+
+      let lastWriteError: unknown;
+
+      for (let writeAttempt = 1; writeAttempt <= WRITE_ATTEMPTS; writeAttempt += 1) {
+        const writeResult = await this.tryWriteTargetTemperature(value);
+
+        lastWriteError = writeResult.error;
+
+        const confirmation = await this.tryConfirmTargetTemperature(value);
+
+        if (confirmation.state !== undefined) {
+          return confirmation.state;
+        }
+
+        if (writeAttempt < WRITE_ATTEMPTS) {
+          await this.wait(CONFIRMATION_DELAY_MS);
+        } else {
+          throw this.createTargetTemperatureConfirmationError(
+            value,
+            confirmation.lastState,
+            confirmation.lastReadError,
+            lastWriteError,
+          );
+        }
+      }
+
+      throw new Error('État interne invalide pendant la commande de consigne.');
+    });
+  }
+
   private async tryReadStateBeforeWrite(): Promise<HvacState | undefined> {
     try {
       return await this.readStateInNewConnection();
@@ -136,6 +175,19 @@ export class TuyaHvacGateway implements HvacGateway {
     try {
       await this.client.connect();
       await this.client.setDp(Number(IVW_INVERTER_10_PROFILE.dps.mode), mode);
+
+      return {};
+    } catch (error) {
+      return { error };
+    } finally {
+      this.client.disconnect();
+    }
+  }
+
+  private async tryWriteTargetTemperature(value: number): Promise<WriteAttemptResult> {
+    try {
+      await this.client.connect();
+      await this.client.setDp(Number(IVW_INVERTER_10_PROFILE.dps.targetTemperature), value);
 
       return {};
     } catch (error) {
@@ -198,6 +250,36 @@ export class TuyaHvacGateway implements HvacGateway {
         lastReadError = undefined;
 
         if (state.mode === expectedMode) {
+          return { state };
+        }
+      } catch (error) {
+        lastReadError = error;
+      }
+    }
+
+    return { lastState, lastReadError };
+  }
+
+  private async tryConfirmTargetTemperature(expectedValue: number): Promise<{
+    readonly state?: HvacState;
+    readonly lastState?: HvacState;
+    readonly lastReadError?: unknown;
+  }> {
+    let lastState: HvacState | undefined;
+    let lastReadError: unknown;
+
+    for (let attempt = 1; attempt <= CONFIRMATION_ATTEMPTS; attempt += 1) {
+      if (attempt > 1) {
+        await this.wait(CONFIRMATION_DELAY_MS);
+      }
+
+      try {
+        const state = await this.readStateInNewConnection();
+
+        lastState = state;
+        lastReadError = undefined;
+
+        if (state.targetTemperature === expectedValue) {
           return { state };
         }
       } catch (error) {
@@ -287,6 +369,49 @@ export class TuyaHvacGateway implements HvacGateway {
         `${WRITE_ATTEMPTS} écritures : ${this.formatError(lastReadError)}.` +
         writeContext,
     );
+  }
+
+  private createTargetTemperatureConfirmationError(
+    expectedValue: number,
+    lastState: HvacState | undefined,
+    lastReadError: unknown,
+    lastWriteError: unknown,
+  ): Error {
+    const writeContext =
+      lastWriteError === undefined
+        ? ''
+        : ` Dernière erreur d’écriture : ${this.formatError(lastWriteError)}.`;
+
+    if (lastState !== undefined) {
+      return new Error(
+        `Commande de consigne non confirmée après ${WRITE_ATTEMPTS} écritures et ` +
+          `${CONFIRMATION_ATTEMPTS} lectures par écriture : ` +
+          `température attendue=${expectedValue}, température reçue=${lastState.targetTemperature}.` +
+          writeContext,
+      );
+    }
+
+    return new Error(
+      `Impossible de confirmer la commande de consigne après ` +
+        `${WRITE_ATTEMPTS} écritures : ${this.formatError(lastReadError)}.` +
+        writeContext,
+    );
+  }
+
+  private validateTargetTemperature(value: number): void {
+    const capabilities = IVW_INVERTER_10_PROFILE.targetTemperature;
+
+    if (
+      !Number.isFinite(value) ||
+      value < capabilities.min ||
+      value > capabilities.max ||
+      (value - capabilities.min) % capabilities.step !== 0
+    ) {
+      throw new Error(
+        `Consigne invalide : valeur entière attendue entre ` +
+          `${capabilities.min} et ${capabilities.max} °C.`,
+      );
+    }
   }
 
   private formatError(error: unknown): string {

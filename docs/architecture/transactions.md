@@ -20,8 +20,8 @@ A response must contain DP1, DP2, DP3 and DP4 before it can be mapped to `HvacSt
 
 ## Bounded confirmation
 
-The current validated strategy uses at most two idempotent writes and five reads per write, separated by 500 ms after the first read. These bounds were introduced after real DP1 failures and are reused for DP4 while it undergoes device validation.
+The current strategy uses at most two idempotent writes and five reads per write, separated by 500 ms after the first read. These bounds were introduced after real DP1 failures and validated end to end for DP1, DP2 and DP4.
 
 ## Serialization
 
-Transactions for one device are serialized by `TuyaHvacGateway`; reads and writes do not overlap. HomeKit background workers may accept newer intentions while a transaction is running, but only the latest pending intention for a characteristic is retained.
+Transactions for one device are serialized by `TuyaHvacGateway`; reads and writes do not overlap. HomeKit background workers may accept newer intentions while a transaction is running, but only the latest pending intention for power, mode or the shared target temperature is retained.

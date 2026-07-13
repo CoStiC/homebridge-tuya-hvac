@@ -14,6 +14,10 @@ export class HeaterCoolerAccessory {
   private modeRequestId = 0;
   private modeWorkerRunning = false;
   private pendingModeRequest: { readonly mode: HvacMode; readonly requestId: number } | undefined;
+  private targetTemperatureRequestId = 0;
+  private targetTemperatureWorkerRunning = false;
+  private pendingTargetTemperatureRequest:
+    { readonly value: number; readonly requestId: number } | undefined;
 
   public constructor(
     private readonly platform: TuyaHvacPlatform,
@@ -51,6 +55,19 @@ export class HeaterCoolerAccessory {
       maxValue: 32,
       minStep: 1,
     });
+
+    const setTargetTemperature = (value: unknown): void => {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(`Consigne HomeKit invalide : ${String(value)}.`);
+      }
+
+      const requestId = ++this.targetTemperatureRequestId;
+      this.platform.log.info('[consigne #%d] Commande reçue → %s °C.', requestId, value);
+      void this.setTargetTemperatureInBackground(value, requestId);
+    };
+
+    heatingThreshold.onSet(setTargetTemperature);
+    coolingThreshold.onSet(setTargetTemperature);
 
     this.service
       .setCharacteristic(this.platform.Characteristic.Name, this.accessory.displayName)
@@ -264,6 +281,95 @@ export class HeaterCoolerAccessory {
     } catch (refreshError) {
       this.platform.log.error(
         '[mode #%d] Impossible de resynchroniser l’état après échec : %s',
+        requestId,
+        refreshError instanceof Error ? refreshError.message : String(refreshError),
+      );
+    }
+  }
+
+  private async setTargetTemperatureInBackground(value: number, requestId: number): Promise<void> {
+    this.pendingTargetTemperatureRequest = { value, requestId };
+
+    if (this.targetTemperatureWorkerRunning) {
+      return;
+    }
+
+    this.targetTemperatureWorkerRunning = true;
+
+    try {
+      while (this.pendingTargetTemperatureRequest !== undefined) {
+        const request = this.pendingTargetTemperatureRequest;
+
+        this.pendingTargetTemperatureRequest = undefined;
+        await this.processTargetTemperatureRequest(request.value, request.requestId);
+      }
+    } finally {
+      this.targetTemperatureWorkerRunning = false;
+    }
+  }
+
+  private async processTargetTemperatureRequest(value: number, requestId: number): Promise<void> {
+    try {
+      const state = await this.controller.setTargetTemperature(value);
+      const pendingRequest = this.pendingTargetTemperatureRequest;
+
+      if (pendingRequest?.value === state.targetTemperature) {
+        this.pendingTargetTemperatureRequest = undefined;
+        this.applyConfirmedTargetTemperatureState(state, pendingRequest.requestId);
+      } else if (requestId === this.targetTemperatureRequestId) {
+        this.applyConfirmedTargetTemperatureState(state, requestId);
+      } else {
+        this.platform.log.debug('[consigne #%d] Résultat obsolète ignoré.', requestId);
+      }
+    } catch (error) {
+      this.platform.log.error(
+        '[consigne #%d] Impossible de modifier la consigne de la PAC : %s',
+        requestId,
+        error instanceof Error ? error.message : String(error),
+      );
+
+      if (
+        requestId !== this.targetTemperatureRequestId ||
+        this.pendingTargetTemperatureRequest !== undefined
+      ) {
+        this.platform.log.debug('[consigne #%d] Resynchronisation obsolète ignorée.', requestId);
+        return;
+      }
+
+      await this.restoreTargetTemperatureStateAfterFailure(requestId);
+    }
+  }
+
+  private applyConfirmedTargetTemperatureState(state: HvacState, requestId: number): void {
+    this.applyState(state);
+    this.platform.log.info(
+      '[consigne #%d] Commande → %s °C confirmée.',
+      requestId,
+      state.targetTemperature,
+    );
+  }
+
+  private async restoreTargetTemperatureStateAfterFailure(requestId: number): Promise<void> {
+    try {
+      const actualState = await this.controller.getState();
+
+      if (
+        requestId !== this.targetTemperatureRequestId ||
+        this.pendingTargetTemperatureRequest !== undefined
+      ) {
+        this.platform.log.debug('[consigne #%d] État restauré obsolète ignoré.', requestId);
+        return;
+      }
+
+      this.applyState(actualState);
+      this.platform.log.info(
+        '[consigne #%d] État réel restauré après échec : consigne=%s °C.',
+        requestId,
+        actualState.targetTemperature,
+      );
+    } catch (refreshError) {
+      this.platform.log.error(
+        '[consigne #%d] Impossible de resynchroniser l’état après échec : %s',
         requestId,
         refreshError instanceof Error ? refreshError.message : String(refreshError),
       );
