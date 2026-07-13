@@ -11,6 +11,16 @@ The current device profile supports the IVW Inverter 10 swimming-pool heat pump 
 - a supported Tuya device reachable from the Homebridge host over the LAN;
 - the device ID, Local Key and fixed or reserved IP address obtained during setup.
 
+## Beta installation
+
+After the first beta is published, install it explicitly through the `beta` dist-tag:
+
+```bash
+npm install homebridge-tuya-hvac@beta
+```
+
+The unqualified command `npm install homebridge-tuya-hvac` will not select the beta while no `latest` dist-tag has been assigned.
+
 ## Local package installation
 
 Create the package from a clean checkout:
@@ -27,7 +37,7 @@ Install the resulting tarball in the Homebridge environment:
 npm install /path/to/homebridge-tuya-hvac-0.1.0.tgz
 ```
 
-This project is not yet published to npm. Keep the tarball private because it represents a development build.
+Keep local tarballs private because they represent development builds.
 
 ## Configuration
 
@@ -80,7 +90,7 @@ Real-device validation is required for protocol-facing changes. Unit tests alone
 
 ## Project status
 
-This project is under active development and is not yet ready for public npm publication.
+Version 0.1.0 is the first public beta. The API and supported behavior may still evolve before a stable release.
 
 ## License
 

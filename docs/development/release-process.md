@@ -1,6 +1,6 @@
 # Release process
 
-The project is not yet published to npm. Until the publication policy is approved, releases are validated as local npm tarballs only.
+The first public version is published under the npm `beta` dist-tag. The package `publishConfig` pins the public registry, public access and `beta` tag so an unqualified `npm publish` cannot update `latest` accidentally.
 
 ## Prerequisites
 
@@ -55,10 +55,28 @@ Delete the generated tarball after validation. Do not commit it.
 
 ## Public beta publication
 
-Public npm publication remains blocked until all of the following are explicitly decided and completed:
+Before publication, verify all of the following:
 
-- remove `private: true` intentionally;
 - verify the final package name, repository URL and support metadata;
 - verify that the Node.js 22 and 24 GitHub Actions jobs pass on the release commit;
 - approve the changelog and public version;
 - complete the beta publication checklist in Notion.
+
+Authenticate without displaying or storing a token in the repository, then publish with the explicit tag as a second safeguard:
+
+```bash
+npm publish --tag beta
+```
+
+Verify the published metadata and installation:
+
+```bash
+npm view homebridge-tuya-hvac@beta
+npm install homebridge-tuya-hvac@beta
+```
+
+If version 0.1.0 is accepted unchanged as the stable release, promote the existing artifact instead of publishing the same version again:
+
+```bash
+npm dist-tag add homebridge-tuya-hvac@0.1.0 latest
+```
