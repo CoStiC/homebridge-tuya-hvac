@@ -7,6 +7,10 @@ import type { TuyaHvacPlatform } from '../platform.js';
 
 export class HeaterCoolerAccessory {
   private readonly service: Service;
+  private activeRequestId = 0;
+  private activeWorkerRunning = false;
+  private pendingActiveRequest:
+    { readonly active: boolean; readonly requestId: number } | undefined;
 
   public constructor(
     private readonly platform: TuyaHvacPlatform,
@@ -60,6 +64,13 @@ export class HeaterCoolerAccessory {
         this.platform.Characteristic.TargetHeaterCoolerState.AUTO,
       );
 
+    this.service.getCharacteristic(this.platform.Characteristic.Active).onSet((value) => {
+      const active = value === this.platform.api.hap.Characteristic.Active.ACTIVE;
+      const requestId = ++this.activeRequestId;
+      this.platform.log.info('[#%d] Commande Active reçue → %s.', requestId, active ? 'ON' : 'OFF');
+      void this.setActiveInBackground(active, requestId);
+    });
+
     void this.refreshState();
   }
 
@@ -80,6 +91,90 @@ export class HeaterCoolerAccessory {
       this.platform.log.error(
         'Impossible de lire l’état initial de la PAC : %s',
         error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private async setActiveInBackground(active: boolean, requestId: number): Promise<void> {
+    this.pendingActiveRequest = { active, requestId };
+
+    if (this.activeWorkerRunning) {
+      return;
+    }
+
+    this.activeWorkerRunning = true;
+
+    try {
+      while (this.pendingActiveRequest !== undefined) {
+        const request = this.pendingActiveRequest;
+
+        this.pendingActiveRequest = undefined;
+
+        await this.processActiveRequest(request.active, request.requestId);
+      }
+    } finally {
+      this.activeWorkerRunning = false;
+    }
+  }
+
+  private async processActiveRequest(active: boolean, requestId: number): Promise<void> {
+    try {
+      const state = await this.controller.setActive(active);
+      const pendingRequest = this.pendingActiveRequest;
+
+      if (pendingRequest?.active === state.active) {
+        this.pendingActiveRequest = undefined;
+        this.applyConfirmedActiveState(state, pendingRequest.requestId);
+      } else if (requestId === this.activeRequestId) {
+        this.applyConfirmedActiveState(state, requestId);
+      } else {
+        this.platform.log.debug('[#%d] Résultat Active obsolète ignoré.', requestId);
+      }
+    } catch (error) {
+      this.platform.log.error(
+        '[#%d] Impossible de modifier l’état de la PAC : %s',
+        requestId,
+        error instanceof Error ? error.message : String(error),
+      );
+
+      if (requestId !== this.activeRequestId || this.pendingActiveRequest !== undefined) {
+        this.platform.log.debug('[#%d] Resynchronisation obsolète ignorée.', requestId);
+        return;
+      }
+
+      await this.restoreActiveStateAfterFailure(requestId);
+    }
+  }
+
+  private applyConfirmedActiveState(state: HvacState, requestId: number): void {
+    this.applyState(state);
+    this.platform.log.info(
+      '[#%d] Commande Active → %s confirmée.',
+      requestId,
+      state.active ? 'ON' : 'OFF',
+    );
+  }
+
+  private async restoreActiveStateAfterFailure(requestId: number): Promise<void> {
+    try {
+      const actualState = await this.controller.getState();
+
+      if (requestId !== this.activeRequestId || this.pendingActiveRequest !== undefined) {
+        this.platform.log.debug('[#%d] État restauré obsolète ignoré.', requestId);
+        return;
+      }
+
+      this.applyState(actualState);
+      this.platform.log.info(
+        '[#%d] État réel restauré après échec : active=%s.',
+        requestId,
+        actualState.active,
+      );
+    } catch (refreshError) {
+      this.platform.log.error(
+        '[#%d] Impossible de resynchroniser l’état après échec : %s',
+        requestId,
+        refreshError instanceof Error ? refreshError.message : String(refreshError),
       );
     }
   }

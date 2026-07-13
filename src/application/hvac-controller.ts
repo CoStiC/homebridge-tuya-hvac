@@ -7,4 +7,8 @@ export class HvacController {
   public getState(): Promise<HvacState> {
     return this.gateway.getState();
   }
+
+  public setActive(active: boolean): Promise<HvacState> {
+    return this.gateway.setActive(active);
+  }
 }
